@@ -15,13 +15,16 @@ use radix_event_stream::sources::gateway::GatewayTransactionStream;
 use radix_event_stream::{anyhow, macros::event_handler};
 use radix_event_stream::{event_handler::HandlerRegistry, processor::TransactionStreamProcessor};
 use redis::Commands;
+use serde::Serialize;
+use serde_json::to_string;
 use std::env;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::*;
 
 pub const PACKAGE_ADDRESS: &str =
-    "package_tdx_2_1p4aaxp4w7l3wmvcwtrap2t99mjx2s47npmnuac5dekdegh09sa7jva";
+    "component_tdx_2_1crfkh6eespj0hxe6eva9dxgkfqv7hrsqqxz8wvnpc5uh2v27u43hz8";
 
 #[derive(ScryptoSbor, Debug)]
 pub struct Listing {
@@ -47,7 +50,7 @@ pub struct Listing {
     time_of_listing: Instant,
 }
 
-#[derive(ScryptoSbor, Debug)]
+#[derive(ScryptoSbor, Debug, Serialize)]
 pub struct ParsedListing {
     pub secondary_seller_permissions: Vec<String>,
     pub currency: String,
@@ -195,7 +198,6 @@ impl ListingUpdated {
         })
     }
 }
-
 #[event_handler]
 async fn handle_listing_created_event(
     context: EventHandlerContext<State>,
@@ -209,8 +211,13 @@ async fn handle_listing_created_event(
         EventHandlerError::EventRetryError(anyhow!("Could not get connection to redis: {}", e))
     })?;
 
-    // Publish a message
-    let _: () = con.publish("events", event.resource_address).map_err(|e| {
+    // Convert the ParsedListing object to a JSON string
+    let event_json = to_string(&event).map_err(|e| {
+        EventHandlerError::EventRetryError(anyhow!("Could not serialize event to JSON: {}", e))
+    })?;
+
+    // Publish the JSON string
+    let _: () = con.publish("events", &event_json).map_err(|e| {
         EventHandlerError::EventRetryError(anyhow!("Could not publish message to redis: {}", e))
     })?;
     Ok(())
@@ -291,7 +298,7 @@ async fn main() {
     let mut handler_registry = HandlerRegistry::new();
 
     handler_registry.add_handler(
-        "package_tdx_2_1p4aaxp4w7l3wmvcwtrap2t99mjx2s47npmnuac5dekdegh09sa7jva",
+        PACKAGE_ADDRESS,
         "ListingCreated",
         handle_listing_created_event,
     );
